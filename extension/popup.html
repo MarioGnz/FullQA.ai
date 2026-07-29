@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<style>
+  :root {
+    --bg: #eef2f8; --surface: #ffffff; --border: #dde5f0;
+    --text: #0c1428; --muted: #5d6b85;
+    --accent: #4f46e5; --accent-h: #4338ca; --accent2: #0891b2;
+    --ok: #059669; --warn: #d97706; --bad: #dc2626;
+    --header: #0d1322; --header-fg: #f4f7ff; --header-muted: #93a1bd;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #090f1e; --surface: #101828; --border: #1f2c47;
+      --text: #e4eaf6; --muted: #8598b8;
+      --accent: #6366f1; --accent-h: #818cf8; --accent2: #22d3ee;
+      --ok: #34d399; --warn: #fbbf24; --bad: #f87171;
+      --header: #060b16;
+    }
+  }
+  * { box-sizing: border-box; margin: 0; font-family: 'Segoe UI Variable Text','Segoe UI',system-ui,sans-serif; }
+  body { width: 340px; background: var(--bg); color: var(--text); font-size: 13px; }
+
+  /* ── Header ─────────────────────────────────────────────── */
+  header {
+    display: flex; align-items: center; gap: 10px;
+    padding: 13px 14px; background: var(--header); color: var(--header-fg);
+    border-bottom: 2px solid var(--accent);
+  }
+  header .mark {
+    width: 30px; height: 30px; border-radius: 8px; flex: none;
+    background: linear-gradient(135deg, var(--accent) 0%, var(--accent2) 100%);
+    color: #fff; font-weight: 800; font-size: 12px; letter-spacing: .5px;
+    display: flex; align-items: center; justify-content: center;
+  }
+  header .titles { flex: 1; min-width: 0; }
+  header .title { font-weight: 800; font-size: 14px; letter-spacing: .2px; }
+  header .sub { color: var(--header-muted); font-size: 10.5px; font-family: Consolas, monospace; }
+  .lang-switch {
+    display: flex; flex: none; border: 1px solid rgba(255,255,255,.22);
+    border-radius: 7px; overflow: hidden;
+  }
+  .lang-btn {
+    border: none; background: transparent; color: var(--header-muted);
+    font-size: 11px; font-weight: 700; padding: 4px 8px; cursor: pointer;
+  }
+  .lang-btn.active { background: var(--accent); color: #fff; }
+
+  /* ── Cards ──────────────────────────────────────────────── */
+  .card {
+    margin: 12px 12px 0; padding: 12px 14px; background: var(--surface);
+    border: 1px solid var(--border); border-radius: 12px;
+  }
+
+  /* Status */
+  .status-row { display: flex; align-items: center; gap: 11px; }
+  .dot { width: 11px; height: 11px; border-radius: 50%; background: var(--muted); flex: none; }
+  .dot.ok  { background: var(--ok);  box-shadow: 0 0 0 4px color-mix(in srgb, var(--ok) 18%, transparent); }
+  .dot.bad { background: var(--bad); }
+  .dot.rec { background: var(--bad); animation: pulse 1.4s ease-out infinite; }
+  @keyframes pulse {
+    0%   { box-shadow: 0 0 0 0    color-mix(in srgb, var(--bad) 45%, transparent); }
+    70%  { box-shadow: 0 0 0 9px  color-mix(in srgb, var(--bad) 0%,  transparent); }
+    100% { box-shadow: 0 0 0 0    color-mix(in srgb, var(--bad) 0%,  transparent); }
+  }
+  .status-text { font-weight: 700; }
+  .status-hint { color: var(--muted); font-size: 12px; margin-top: 1px; }
+  .counter {
+    display: flex; align-items: baseline; gap: 6px; justify-content: center;
+    margin-top: 10px; padding-top: 9px; border-top: 1px solid var(--border);
+    color: var(--muted); font-size: 12px;
+  }
+  .counter b { color: var(--accent); font-size: 20px; font-family: Consolas, monospace; }
+
+  /* Options */
+  #options h2 {
+    font-size: 11px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: .8px; color: var(--muted); margin-bottom: 4px;
+  }
+  #options .row {
+    display: flex; align-items: center; justify-content: space-between; gap: 10px;
+    padding: 8px 0; border-bottom: 1px solid var(--border);
+  }
+  #options .row:last-child { border-bottom: none; padding-bottom: 2px; }
+  #options label { color: var(--text); }
+  #options select {
+    background: var(--bg); color: var(--text); border: 1px solid var(--border);
+    border-radius: 7px; padding: 4px 7px; font-size: 12px; max-width: 150px;
+  }
+  #options select:focus { outline: none; border-color: var(--accent); }
+
+  /* Toggle switch */
+  .switch { position: relative; display: inline-block; width: 36px; height: 20px; flex: none; }
+  .switch input { opacity: 0; width: 0; height: 0; }
+  .slider {
+    position: absolute; inset: 0; cursor: pointer; border-radius: 20px;
+    background: var(--border); transition: background .18s;
+  }
+  .slider::before {
+    content: ""; position: absolute; width: 14px; height: 14px; border-radius: 50%;
+    left: 3px; top: 3px; background: #fff; transition: transform .18s;
+    box-shadow: 0 1px 2px rgba(0,0,0,.25);
+  }
+  .switch input:checked + .slider { background: var(--accent); }
+  .switch input:checked + .slider::before { transform: translateX(16px); }
+
+  /* Buttons */
+  .big-btn {
+    display: block; width: calc(100% - 24px); margin: 12px; padding: 12px;
+    border: none; border-radius: 11px; font-size: 14px; font-weight: 700;
+    cursor: pointer; color: #fff; background: var(--accent);
+    transition: filter .15s, transform .05s;
+  }
+  .big-btn:hover { filter: brightness(1.1); }
+  .big-btn:active { transform: scale(.99); }
+  .big-btn.stop { background: var(--bad); }
+  .big-btn:disabled { background: var(--muted); cursor: default; }
+
+  footer {
+    padding: 8px 16px 12px; color: var(--muted); font-size: 10.5px;
+    text-align: center; font-family: Consolas, monospace;
+  }
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+  <header>
+    <div class="mark">QA</div>
+    <div class="titles">
+      <div class="title">FullQA.ai</div>
+      <div class="sub" data-i18n="sub">100% local · sin servidores externos</div>
+    </div>
+    <div class="lang-switch">
+      <button class="lang-btn" data-lang="es">ES</button>
+      <button class="lang-btn" data-lang="en">EN</button>
+    </div>
+  </header>
+
+  <div class="card">
+    <div class="status-row">
+      <div id="dot" class="dot"></div>
+      <div>
+        <div id="status" class="status-text">…</div>
+        <div id="hint" class="status-hint"></div>
+      </div>
+    </div>
+    <div id="counterBox" class="counter hidden">
+      <b id="sent">0</b> <span data-i18n="events">eventos capturados</span>
+    </div>
+  </div>
+
+  <div id="options" class="card hidden">
+    <h2 data-i18n="optionsTitle">Opciones de grabación</h2>
+    <div class="row">
+      <label data-i18n="optLang">Idioma de la documentación</label>
+      <select id="optLang">
+        <option value="es">Español</option>
+        <option value="en">English</option>
+      </select>
+    </div>
+    <div class="row">
+      <label data-i18n="optTarget">Capturar</label>
+      <select id="optTarget">
+        <option value="active" data-i18n="targetActive">Monitor activo</option>
+        <option value="all" data-i18n="targetAll">Toda la pantalla</option>
+      </select>
+    </div>
+    <div class="row">
+      <label data-i18n="optSmart">Captura inteligente (IA local)</label>
+      <label class="switch"><input type="checkbox" id="optSmart"><span class="slider"></span></label>
+    </div>
+    <div class="row">
+      <label data-i18n="optMic">Grabar micrófono</label>
+      <label class="switch"><input type="checkbox" id="optMic"><span class="slider"></span></label>
+    </div>
+  </div>
+
+  <button id="btnStart" class="big-btn hidden">● Iniciar grabación</button>
+  <button id="btnStop"  class="big-btn stop hidden">■ Detener grabación</button>
+
+  <footer id="foot" data-i18n="footer">Passwords jamás · todo queda en tu máquina</footer>
+  <script src="popup.js"></script>
+</body>
+</html>

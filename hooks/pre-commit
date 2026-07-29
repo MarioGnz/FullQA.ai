@@ -1,0 +1,31 @@
+#!/bin/sh
+# pre-commit hook — blocks accidental .env commits.
+# Install: cp hooks/pre-commit .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit
+
+BLOCKED=$(git diff --cached --name-only | grep -E '(^|/)\.env$')
+
+if [ -n "$BLOCKED" ]; then
+  echo ""
+  echo "  ╔══════════════════════════════════════════════════════╗"
+  echo "  ║  COMMIT BLOCKED: .env file detected in staged files  ║"
+  echo "  ║                                                      ║"
+  echo "  ║  Your Anthropic API key must never be committed.     ║"
+  echo "  ║  Run:  git reset HEAD .env                           ║"
+  echo "  ╚══════════════════════════════════════════════════════╝"
+  echo ""
+  exit 1
+fi
+
+# Also block any file that looks like it might contain a raw API key
+KEY_LEAK=$(git diff --cached -U0 | grep -E 'sk-ant-[A-Za-z0-9_-]{20,}')
+if [ -n "$KEY_LEAK" ]; then
+  echo ""
+  echo "  ╔══════════════════════════════════════════════════════╗"
+  echo "  ║  COMMIT BLOCKED: Anthropic API key found in diff!    ║"
+  echo "  ║  Remove the key and store it in .env instead.        ║"
+  echo "  ╚══════════════════════════════════════════════════════╝"
+  echo ""
+  exit 1
+fi
+
+exit 0

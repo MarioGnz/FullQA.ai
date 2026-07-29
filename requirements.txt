@@ -1,0 +1,30 @@
+# Host Agent dependencies — install into a virtualenv on the HOST (not in Docker)
+# pip install -r requirements.txt
+
+# Event capture
+pynput>=1.7.6
+
+# Rich event context — name/type of the UI element clicked (Windows only)
+uiautomation>=2.0.20; platform_system == "Windows"
+
+# Screenshot
+mss>=9.0.1
+
+# Audio recording
+sounddevice>=0.4.6
+scipy>=1.12.0
+numpy>=1.26.0
+
+# Offline speech transcription (downloads model on first run into ./models/)
+faster-whisper>=1.0.1
+
+# System tray UI
+pystray>=0.19.5
+Pillow>=10.3.0
+
+# HTTP client (to talk to the Docker backend)
+requests>=2.31.0
+
+# Desktop UI
+PyQt6>=6.6.0
+markdown>=3.5

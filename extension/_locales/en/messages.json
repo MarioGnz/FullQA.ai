@@ -1,0 +1,8 @@
+{
+  "extName": {
+    "message": "FullQA.ai Recorder (local)"
+  },
+  "extDescription": {
+    "message": "Captures DOM actions (clicks, inputs, navigation) and sends them ONLY to FullQA.ai on 127.0.0.1. No external servers."
+  }
+}

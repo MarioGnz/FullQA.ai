@@ -1,0 +1,51 @@
+# One network:
+#   qa-outbound  — gives the api container outbound internet for Claude API calls only
+#   The desktop UI talks directly to http://localhost:8000 — no web container needed.
+networks:
+  qa-outbound:
+    driver: bridge   # api -> Claude API outbound only
+
+services:
+  api:
+    build: ./services/api
+    container_name: qa-api
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8000:8000"   # localhost only — never 0.0.0.0
+    volumes:
+      - ./qa-sessions:/app/sessions       # agent+UI writes; api reads and can delete
+      - qa-data:/app/data               # SQLite persistent storage
+    environment:
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - GROQ_API_KEY=${GROQ_API_KEY:-}
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      # For Ollama: override if Ollama runs on a non-default port
+      # On Windows/Mac Docker Desktop, host.docker.internal resolves automatically.
+      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://host.docker.internal:11434/v1}
+      # Ollama Cloud (opt-in cloud provider): paste your key in .env as
+      # OLLAMA_API_KEY. Data leaves the machine when this provider is used.
+      - OLLAMA_API_KEY=${OLLAMA_API_KEY:-}
+      - OLLAMA_CLOUD_BASE_URL=${OLLAMA_CLOUD_BASE_URL:-https://ollama.com}
+      # Context window for local Ollama generation. Lower it (e.g. 4096) if the
+      # model spills onto the CPU; raise it if you have lots of VRAM.
+      - OLLAMA_NUM_CTX=${OLLAMA_NUM_CTX:-8192}
+      # Max seconds to wait for local inference (CPU-only Ollama is slow).
+      - OLLAMA_TIMEOUT=${OLLAMA_TIMEOUT:-900}
+      # Screenshots sent to local models (lower = faster on CPU).
+      - MAX_IMAGES_LOCAL=${MAX_IMAGES_LOCAL:-5}
+      # Max session steps sent to the model (raise for long sessions).
+      - MAX_STEPS=${MAX_STEPS:-25}
+      - LOG_LEVEL=warning
+    extra_hosts:
+      - "host.docker.internal:host-gateway"   # Linux fallback (no-op on Windows)
+    networks:
+      - qa-outbound   # allows outbound HTTPS to Claude API
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+volumes:
+  qa-data:

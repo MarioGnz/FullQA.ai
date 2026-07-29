@@ -1,0 +1,59 @@
+# --- Secrets (NEVER commit) ---
+.env
+.env.*
+# keep the documented placeholder(s) tracked:
+!.env.example
+
+# --- Extension signing key & packaged build (NEVER commit the key) ---
+*.pem
+*.crx
+extension.pem
+extension.crx
+
+# --- User data (unique to each user — NEVER ships with the repo) ---
+qa-sessions/
+models/
+qa-report*.pdf
+# Generated Playwright specs live in per-project subfolders — user output.
+qa-scripts/*/
+qa-*.spec.ts
+
+# --- Playwright scripts: keep the .spec.ts, ignore installed deps/artifacts ---
+qa-scripts/node_modules/
+qa-scripts/test-results/
+qa-scripts/playwright-report/
+qa-scripts/package-lock.json
+qa-scripts/.auth/
+
+# --- Audio files ---
+*.wav
+*.mp3
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+venv/
+.venv/
+env/
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.mypy_cache/
+
+# --- OS ---
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# --- Docker ---
+docker-compose.override.yml
+
+# --- IDE ---
+.vscode/settings.json
+.idea/
+*.swp
+*.swo
