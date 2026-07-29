@@ -1,60 +1,62 @@
-# FullQA.ai Recorder — extensión privada de navegador
+📖 **English** · [Español](README.es.md)
 
-Captura lo que el sistema operativo no puede ver: el **selector CSS exacto**, el
-**texto real** del elemento clicado, el **valor final** de cada campo, y las
-**navegaciones** (incluidas SPAs). El agente de FullQA.ai fusiona estos eventos
-con los nativos para que la documentación diga exactamente qué pasó.
+# FullQA.ai Recorder — private browser extension
 
-Incluye un **popup** (clic en el icono azul "QA" de la barra) que muestra en
-vivo: si el agente está conectado, si hay grabación activa, y cuántos eventos
-se han enviado. El icono muestra un contador verde mientras graba.
+Captures what the operating system can't see: the **exact CSS selector**, the
+**real text** of the clicked element, the **final value** of every field, and
+**navigations** (SPAs included). The FullQA.ai agent merges these events with
+the native ones so the documentation says exactly what happened.
 
-## Cómo funciona (flujo completo)
+It includes a **popup** (click the blue "QA" icon in the toolbar) that shows
+live: whether the agent is connected, whether a recording is active, and how
+many events have been sent. The icon shows a green counter while recording.
+
+## How it works (full flow)
 
 ```
-Página web (content.js)          Service worker              Agente FullQA.ai
-─ escucha clicks/inputs/nav  →   agrupa en lotes (400ms) →   127.0.0.1:8765
-─ extrae selector/texto/valor                                 ↓ solo si grabas
-                                                    events.jsonl de la sesión
+Web page (content.js)            Service worker              FullQA.ai agent
+─ listens to clicks/inputs/nav →  batches them (400ms)  →   127.0.0.1:8765
+─ extracts selector/text/value                                ↓ only while recording
+                                                    the session's events.jsonl
                                                               ↓
-                                              fusión con eventos nativos (UIA)
+                                              merged with native events (UIA)
                                                               ↓
-                                                     documentación generada
+                                                     generated documentation
 ```
 
-## Seguridad y privacidad (por diseño)
+## Security and privacy (by design)
 
-| Capa | Garantía |
+| Layer | Guarantee |
 |---|---|
-| Red | El único host autorizado en el manifest es `http://127.0.0.1:8765` — Chrome **bloquea** cualquier otro destino. Nada sale de tu máquina. |
-| Agente | Escucha solo en `127.0.0.1` (inaccesible desde la red) y **solo mientras grabas**; sin sesión activa, descarta todo. |
-| Anti-inyección | El agente rechaza (403) cualquier POST cuyo `Origin` no sea una extensión — una página web maliciosa no puede meter eventos falsos en tu sesión. |
-| Datos sensibles | `type=password` jamás se captura. Campos que parecen sensibles (tarjeta, CVV, token, PIN…) se redactan en la extensión Y en el agente (doble capa). |
-| Permisos | Solo pide `storage` (contador del popup). Sin `tabs`, sin `history`, sin `cookies`, sin `<all_urls>` de lectura en segundo plano. |
-| Distribución | Se instala **desde carpeta** (descomprimida). Nunca pasa por la Web Store; nadie más puede actualizarla ni verla. |
-| Almacenamiento | La extensión no guarda nada en el navegador (solo el contador, que se borra al cerrarlo). Los eventos viven únicamente en tu `qa-sessions/`. |
+| Network | The only host allowed in the manifest is `http://127.0.0.1:8765` — Chrome **blocks** any other destination. Nothing leaves your machine. |
+| Agent | Listens only on `127.0.0.1` (unreachable from the network) and **only while you are recording**; with no active session, it discards everything. |
+| Anti-injection | The agent rejects (403) any POST whose `Origin` is not an extension — a malicious web page cannot inject fake events into your session. |
+| Sensitive data | `type=password` is never captured. Fields that look sensitive (card, CVV, token, PIN…) are redacted in the extension AND in the agent (two layers). |
+| Permissions | Only requests `storage` (the popup counter). No `tabs`, no `history`, no `cookies`, no background `<all_urls>` read access. |
+| Distribution | Installed **from a folder** (unpacked). It never goes through the Web Store; nobody else can update or see it. |
+| Storage | The extension stores nothing in the browser (only the counter, which is cleared when it closes). Events live solely in your `qa-sessions/`. |
 
-## Instalación (una sola vez, ~1 minuto)
+## Installation (once, ~1 minute)
 
-1. Abre `chrome://extensions` (o `edge://extensions`).
-2. Activa **Modo de desarrollador** (interruptor arriba a la derecha).
-3. Pulsa **Cargar descomprimida** y elige esta carpeta (`FullQA.ai/extension`).
-4. (Opcional) Ancla el icono "QA" a la barra: puzzle 🧩 → pin.
+1. Open `chrome://extensions` (or `edge://extensions`).
+2. Enable **Developer mode** (toggle in the top right).
+3. Click **Load unpacked** and choose this folder (`FullQA.ai/extension`).
+4. (Optional) Pin the "QA" icon to the toolbar: puzzle 🧩 → pin.
 
-> Chrome puede avisar "extensión en modo desarrollador" al reiniciar — es el
-> comportamiento normal de cualquier extensión privada no publicada.
+> Chrome may warn about "extension in developer mode" on restart — that's the
+> normal behaviour for any unpublished private extension.
 
-## Uso
+## Usage
 
-Nada especial: pulsa **Iniciar Grabación** en FullQA.ai y navega como siempre.
-El popup pasará a **verde "Grabando sesión"** y el contador subirá con cada
-acción. Al detener la grabación, los eventos ya están fusionados en la sesión.
+Nothing special: click **Start Recording** in FullQA.ai and browse as usual.
+The popup turns **green "Recording session"** and the counter goes up with every
+action. When you stop recording, the events are already merged into the session.
 
-## Verificar que funciona
+## Verify it works
 
-- Popup: verde = grabando · ámbar = agente conectado sin grabar · rojo = FullQA.ai cerrado.
-- O abre `http://127.0.0.1:8765/ping` → `{"ok": true, "recording": true}`.
+- Popup: green = recording · amber = agent connected but not recording · red = FullQA.ai closed.
+- Or open `http://127.0.0.1:8765/ping` → `{"ok": true, "recording": true}`.
 
-## Desinstalar
+## Uninstall
 
-`chrome://extensions` → Quitar. (Sin grabación activa no envía nada de todos modos.)
+`chrome://extensions` → Remove. (With no active recording it sends nothing anyway.)

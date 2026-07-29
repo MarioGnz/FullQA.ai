@@ -1,3 +1,5 @@
+📖 **English** · [Español](README.es.md)
+
 # FullQA.ai
 
 **A fully local QA session recorder that turns what you do on screen into professional QA documentation and runnable automation — powered by AI, organised by project.**
