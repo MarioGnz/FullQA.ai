@@ -11,6 +11,7 @@ Endpoints
   GET  /sessions/{id}/events                 Return parsed events array
   GET  /sessions/{id}/screenshots/{fname}    Serve a screenshot PNG
   GET  /sessions/{id}/report                 Fetch the generated Markdown report
+  PUT  /sessions/{id}/report                 Overwrite the report with edited Markdown
 
 Security notes
 --------------
@@ -57,7 +58,7 @@ app.add_middleware(
         "http://localhost:3000",
         "http://127.0.0.1:3000",
     ],
-    allow_methods=["GET", "POST", "DELETE"],
+    allow_methods=["GET", "POST", "PUT", "DELETE"],
     allow_headers=["*"],
 )
 
@@ -254,6 +255,10 @@ class GenerateRequest(BaseModel):
     language: str = "en"
     title: str = ""
     description: str = ""
+    # Optional per-session context: the acceptance criteria of the ticket
+    # under test, pasted by the tester. Steers every generated section and
+    # is restated verbatim at the top of the report.
+    acceptance_criteria: str = ""
     sections: list[str] = []   # e.g. ["test_cases", "test_plan", "jira"]
     provider: str = "anthropic"  # "anthropic" | "ollama" | "groq" | "gemini"
     model: str = ""             # empty = use provider default
@@ -267,6 +272,7 @@ def _run_generation(
     sections: list[str] | None = None,
     provider: str = "anthropic",
     model: str = "",
+    acceptance_criteria: str = "",
 ) -> None:
     """Background task: call AI and write report.md to the session folder."""
     session_dir = _session_dir(session_id)
@@ -285,6 +291,7 @@ def _run_generation(
             provider=provider,
             model=model,
             project_context=_project_context_for(session_id),
+            acceptance_criteria=acceptance_criteria,
         )
         report_path.write_text(report, encoding="utf-8")
         update_session_status(session_id, "done", str(report_path))
@@ -341,6 +348,7 @@ def generate_docs(
         req.sections,
         req.provider,
         req.model,
+        req.acceptance_criteria,
     )
     return {"status": "generating", "session_id": session_id}
 
@@ -354,6 +362,7 @@ class MoreCasesRequest(BaseModel):
     count: int = 5
     title: str = ""
     description: str = ""
+    acceptance_criteria: str = ""
     provider: str = "anthropic"
     model: str = ""
 
@@ -375,6 +384,7 @@ def _run_more_cases(session_id: str, req: MoreCasesRequest) -> None:
             provider=req.provider,
             model=req.model,
             project_context=_project_context_for(session_id),
+            acceptance_criteria=req.acceptance_criteria,
         )
         report_path.write_text(existing + "\n\n---\n\n" + extra, encoding="utf-8")
         update_session_status(session_id, "done", str(report_path))
@@ -626,6 +636,33 @@ def get_report(session_id: str):
     if not report_path.exists():
         raise HTTPException(status_code=404, detail="Report not yet generated.")
     return {"report": report_path.read_text(encoding="utf-8")}
+
+
+class ReportUpdate(BaseModel):
+    report: str = ""
+
+
+@app.put("/sessions/{session_id}/report")
+def put_report(session_id: str, req: ReportUpdate):
+    """Overwrite a session's report with Markdown edited by the tester.
+
+    The report is the deliverable, and a generated one always needs a human
+    pass (a status corrected, a case reworded). Saving marks the session
+    "done" so an edited-but-never-generated report still shows up as ready.
+    """
+    _validate_session_id(session_id)
+    if not _session_dir(session_id).exists():
+        raise HTTPException(status_code=404, detail="Session directory not found.")
+    report_path = _report_path(session_id)
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        report_path.write_text(req.report, encoding="utf-8")
+    except OSError as exc:
+        raise HTTPException(status_code=500,
+                            detail=f"Could not write the report: {exc}")
+    update_session_status(session_id, "done", str(report_path))
+    return {"status": "saved", "session_id": session_id,
+            "bytes": len(req.report.encode("utf-8"))}
 
 
 # ------------------------------------------------------------------

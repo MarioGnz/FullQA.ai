@@ -282,12 +282,17 @@ Pick any combination in the **Overview** tab. Sections always render in a logica
 | **Summary / Explanation** | 2–4 sentences: what was tested, the flow, the outcome |
 | **Steps to reproduce** | Clean numbered list of imperative steps |
 | **Exploratory testing** | Charter, areas, observations, risks, coverage (see above) |
-| **Test cases** | Gherkin‑style Given / When / Then table |
+| **Test cases** | One block per case: objective, preconditions, the acceptance criteria it verifies, and a Step / Expected Result / Actual Result / Status table. A test case groups several steps — it is not one case per action. With ticket criteria pasted in, it closes with an AC-coverage table |
 | **Test plan** | Step / Action / Expected / Status table (actions built deterministically from real events) |
 | **Bug report** | Summary, severity, repro steps, expected vs actual |
 | **Jira ticket** | Jira‑ready ticket (title, type, priority, labels, description, repro, expected/actual) |
 
-Every report also ends with a **visual walkthrough**: one screenshot per step. A **+ Test cases** button appends new, non‑duplicate cases to an existing report.
+Every report also ends with a **visual walkthrough**: one screenshot per step.
+
+The report is yours to finish:
+
+- **Edit** opens the report’s Markdown for editing — correct a status, reword a case, add a note — and **Save** writes it back. Screenshots collapse to short `![alt](img://N)` markers while you edit (a report is mostly base64) and are put back on save; delete a marker to drop that screenshot.
+- **+ Test cases** appends new, non‑duplicate cases to an existing report. The box next to it picks how many (1–20), and the choice is remembered.
 
 ---
 
@@ -483,6 +488,7 @@ The richer the captured fields (`selector`, `control`, `element`), the better bo
 | `POST` | `/sessions/{id}/generate` | Start async report generation (sections, provider, model) |
 | `POST` | `/sessions/{id}/report/more-cases` | Append N new test cases |
 | `GET`  | `/sessions/{id}/report` | Fetch the generated Markdown report |
+| `PUT`  | `/sessions/{id}/report` | Overwrite the report with edited Markdown |
 | `GET`  | `/sessions/{id}/events` | Parsed events |
 | `GET`  | `/sessions/{id}/screenshots/{file}` | Serve a screenshot PNG |
 | `GET`  | `/sessions/{id}/playwright` | Generate a professional Playwright spec |

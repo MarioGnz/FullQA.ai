@@ -53,6 +53,9 @@ MAX_STEPS          = int(os.environ.get("MAX_STEPS", "25"))
 MAX_CONSECUTIVE_SCROLLS = 1  # keep at most 1 screenshot per scroll burst
 # Max characters of spoken narration (transcript.txt) injected into prompts.
 MAX_NARRATION_CHARS = int(os.environ.get("MAX_NARRATION_CHARS", "2000"))
+# Max characters of the ticket's acceptance criteria injected into prompts.
+# Optional and per session - pasted by the tester from the ticket under test.
+MAX_AC_CHARS = int(os.environ.get("MAX_AC_CHARS", "4000"))
 
 
 # ------------------------------------------------------------------
@@ -387,10 +390,13 @@ def group_events_into_steps(events: list[dict]) -> list[dict]:
 # Models known to accept image inputs
 _VISION_MODELS: set[str] = {
     "claude-sonnet-5",
+    "claude-opus-5",
     "claude-opus-4-8",
     "claude-haiku-4-5",
+    "qwen3-vl:8b",
     "qwen2.5vl:7b",
     "qwen3-vl:235b",
+    "minicpm-v4.5:8b",
     "llama3.2-vision:11b",
     "llava:13b",
     "llava:7b",
@@ -402,6 +408,9 @@ _VISION_MODELS: set[str] = {
 
 _DEFAULT_MODEL: dict[str, str] = {
     "anthropic":    "claude-sonnet-5",
+    # qwen2.5vl is NOT a reasoning model, which matters here: qwen3-vl:8b runs
+    # away thinking (>4k tokens, done_reason=length) on the bug-report and
+    # test-case prompts and returns empty content. Verified 2026-07-30.
     "ollama":       "qwen2.5vl:7b",
     "ollama-cloud": "qwen3-vl:235b",   # vision model hosted on Ollama Cloud
     "groq":         "meta-llama/llama-4-scout-17b-16e-instruct",
@@ -486,8 +495,59 @@ def _project_prefix(project_context: str) -> str:
     )
 
 
-def _context_block(title: str, description: str, session_dir: Path) -> str:
-    """Per-session prompt context: title, description, spoken narration.
+def _clean_ac(acceptance_criteria: str) -> str:
+    """Normalise the pasted acceptance criteria: trimmed and length-capped."""
+    text = (acceptance_criteria or "").strip()
+    if not text:
+        return ""
+    if len(text) > MAX_AC_CHARS:
+        text = text[:MAX_AC_CHARS].rstrip() + " …"
+    return text
+
+
+def _ac_markdown(acceptance_criteria: str) -> list[str]:
+    """The criteria as Markdown lines, one bullet per criterion.
+
+    Testers paste them as plain lines ("AC1 - ..."), which Markdown would
+    otherwise glue into a single paragraph. Lines that already carry a list
+    or heading marker are left exactly as pasted.
+    """
+    import re as _re
+    out: list[str] = []
+    for line in _clean_ac(acceptance_criteria).splitlines():
+        text = line.rstrip()
+        if not text.strip():
+            out.append("")
+        elif _re.match(r"^\s*([-*+>#|]|\d+[.)])", text):
+            out.append(text)
+        else:
+            out.append(f"- {text.strip()}")
+    return out
+
+
+def _ac_block(acceptance_criteria: str) -> str:
+    """The ticket's acceptance criteria, framed as the requirement to verify.
+
+    Optional and per session: the tester pastes them from the ticket before
+    generating. Unlike the project background (stable, cacheable) these change
+    with every session, so they belong in the per-session context block.
+    """
+    ac = _clean_ac(acceptance_criteria)
+    if not ac:
+        return ""
+    return (
+        "Acceptance criteria of the ticket under test (pasted by the tester — "
+        "these are the REQUIREMENTS the product must satisfy; the test cases "
+        "exist to verify them). Reference each criterion by its identifier "
+        "(AC1, AC2 … or the ticket's own numbering):\n"
+        f'"""\n{ac}\n"""\n'
+    )
+
+
+def _context_block(title: str, description: str, session_dir: Path,
+                   acceptance_criteria: str = "") -> str:
+    """Per-session prompt context: title, description, acceptance criteria,
+    spoken narration.
 
     Project background is handled separately as a cacheable prefix — see
     ``_project_prefix`` — so it is intentionally NOT included here.
@@ -497,6 +557,7 @@ def _context_block(title: str, description: str, session_dir: Path) -> str:
         ctx += f"Testing title: {title}\n"
     if description:
         ctx += f"Context: {description}\n"
+    ctx += _ac_block(acceptance_criteria)
     narration = _load_transcript(session_dir)
     if narration:
         ctx += (
@@ -1323,6 +1384,7 @@ def _report_header(
     title: str,
     description: str,
     language: str,
+    acceptance_criteria: str = "",
 ) -> str:
     """Build a small metadata header for the top of the report."""
     es = language == "es"
@@ -1350,6 +1412,15 @@ def _report_header(
         lines.append("|" + "|".join("---" for _ in meta) + "|")
         lines.append("| " + " | ".join(v for _, v in meta) + " |")
         lines.append("")
+    # The ticket's acceptance criteria, when the tester pasted them: shown
+    # verbatim so the report states the requirement it was tested against.
+    ac = _clean_ac(acceptance_criteria)
+    if ac:
+        lines.append("### " + ("Criterios de aceptación"
+                               if es else "Acceptance Criteria"))
+        lines.append("")
+        lines.extend(_ac_markdown(ac))
+        lines.append("")
     return "\n".join(lines)
 
 
@@ -1365,41 +1436,105 @@ def generate_test_cases(
     provider: str = "anthropic",
     model: str = "",
     project_context: str = "",
+    acceptance_criteria: str = "",
 ) -> str:
+    """Test cases as BLOCKS: one case = one objective + several steps.
+
+    Deliberately NOT Gherkin and NOT one case per recorded action: a QA test
+    case groups the steps that together verify one objective, and each step
+    carries its expected result, the actual result and a status — the shape
+    that pastes into Jira/Xray/TestRail/Zephyr. When the tester supplied the
+    ticket's acceptance criteria, each case names the criteria it verifies and
+    the section closes with an AC-coverage table.
+    """
     steps, err = _load_steps(session_dir)
     if err:
         return err
     lang = _lang_instruction(language)
     prefix = _project_prefix(project_context)
-    ctx = _context_block(title, description, session_dir)
+    ctx = _context_block(title, description, session_dir, acceptance_criteria)
     vision = _model_has_vision(model or _DEFAULT_MODEL.get(provider, ""))
     max_img, max_w = _image_policy(provider)
-    heading = "## Casos de prueba" if language == "es" else "## Test Cases"
+    es = language == "es"
+    heading = "## Casos de prueba" if es else "## Test Cases"
+    has_ac = bool(_clean_ac(acceptance_criteria))
+    # Roughly one case per three recorded steps, kept inside sane bounds.
+    max_cases = max(2, min(8, len(steps) // 3 or 2))
+    cols = (("#", "Paso", "Resultado esperado", "Resultado obtenido", "Estado")
+            if es else
+            ("#", "Step", "Expected Result", "Actual Result", "Status"))
+    l_pre = "Precondiciones" if es else "Preconditions"
+    l_ac = "Criterios de aceptación" if es else "Acceptance criteria"
+    cov_hdr = ("Cobertura de criterios de aceptación"
+               if es else "Acceptance criteria coverage")
+    cov_cols = (("Criterio", "Cubierto por", "Estado") if es
+                else ("Criterion", "Covered by", "Status"))
+
+    ac_rules = ""
+    if has_ac:
+        ac_rules = (
+            "- The acceptance criteria above are the contract for this ticket: "
+            "EVERY criterion must be verified by at least one test case. In each "
+            f"case's **{l_ac}** field, name the criteria it covers (e.g. "
+            "'AC2: the user sees an error for an invalid password').\n"
+            "- If a criterion was NOT exercised by the recording, still write its "
+            "case: describe the steps a tester would run, put '—' in "
+            f"{cols[3]} and set {cols[4]} to NOT RUN. Add '(not covered by this "
+            "recording)' to that case's title.\n"
+            "- After ALL case blocks, close the section with this coverage table "
+            f"under the heading line '### {cov_hdr}':\n"
+            f"| {' | '.join(cov_cols)} |\n"
+            "|---|---|---|\n"
+            "| AC1 | TC-01, TC-03 | PASS |\n"
+            "One row per acceptance criterion, none omitted.\n"
+        )
+
     content = [{
         "type": "text",
         "text": (
-            f"You are a senior QA engineer. {lang}\n"
+            f"You are a senior QA engineer writing formal test cases. {lang}\n"
             f"{ctx}\n"
-            f"Below are the key steps of a recorded QA session (screenshots + actions). "
-            f"The session has EXACTLY {len(steps)} steps — never invent steps beyond them.\n"
-            "Steps may name the exact UI element interacted with (button, field, link…) "
-            "and the window/app — use those names verbatim in your test cases instead "
-            "of coordinates.\n"
-            f"Start your response with the heading line: {heading} (write it ONCE).\n"
-            "Then output ONLY ONE Markdown table — a single header row, then data rows. "
-            "Never repeat the heading or the table header. No other prose, no code blocks.\n"
-            "Columns: **#** | **Given** | **When** | **Then**\n\n"
+            "Below are the key steps of a recorded QA session (screenshots + "
+            f"actions). The session has EXACTLY {len(steps)} steps — never "
+            "invent steps beyond them.\n"
+            "Steps may name the exact UI element interacted with (button, field, "
+            "link) and the window/app — use those names verbatim instead of "
+            "coordinates.\n"
+            f"Start your response with the heading line: {heading} (write it "
+            "ONCE).\n"
+            "Then write ONE BLOCK PER TEST CASE, in exactly this shape:\n\n"
+            "### TC-01 — <objective of this case>\n"
+            f"**{l_pre}:** <state the system is in before step 1>\n"
+            f"**{l_ac}:** <what must hold for this case to pass>\n\n"
+            f"| {' | '.join(cols)} |\n"
+            "|---|---|---|---|---|\n"
+            "| 1 | <action on the named control> | <expected observable result> | "
+            "<what the evidence shows> | PASS |\n"
+            "| 2 | ... | ... | ... | [UNCLEAR] |\n\n"
             "Rules:\n"
-            "- One row per meaningful user action. Merge trivial or duplicate steps, "
-            f"but produce at least {max(4, len(steps) // 3)} rows — never collapse "
-            "the whole session into one row.\n"
-            "- Given: precondition/starting state.\n"
-            "- When: the exact action performed (name the real control, e.g. "
-            "'clicks the \"Iniciar sesión\" button').\n"
-            "- Then: the expected observable result.\n"
-            "- Never invent element names; if a step lacks one, describe the visible target.\n"
-            "- Do NOT embed images; the report already includes the screenshots separately.\n"
-            "- Be concise. No commentary outside the heading and table.\n\n"
+            "- A TEST CASE IS A GROUP OF STEPS, never one case per recorded "
+            f"action. Produce between 2 and {max_cases} cases, each with at least "
+            "2 step rows (a single-step case is acceptable only when the session "
+            "genuinely has nothing to group with it).\n"
+            "- Group the steps that serve ONE objective (e.g. 'Log in with valid "
+            "credentials', 'Search for a product', 'Complete the checkout') and "
+            "title the case with that objective.\n"
+            "- Every meaningful recorded action must appear in exactly one case, "
+            "in chronological order. Merge trivial or duplicate steps.\n"
+            f"- {cols[2]}: what SHOULD happen. {cols[3]}: what the screenshots and "
+            "steps actually show — never assume success.\n"
+            f"- {cols[4]} is exactly one of PASS / FAIL / BLOCKED / [UNCLEAR] / "
+            "NOT RUN, written in English even when the rest is in another "
+            "language.\n"
+            "- Number the cases TC-01, TC-02, … Keep the field labels and the "
+            "column headers exactly as written above.\n"
+            f"{ac_rules}"
+            "- Never invent element names; if a step lacks one, describe the "
+            "visible target.\n"
+            "- Do NOT embed images; the report already includes the screenshots "
+            "separately.\n"
+            "- No prose outside the heading and the blocks described above. "
+            "No code blocks.\n\n"
             f"{_GROUNDING}"
         ),
     }]
@@ -1479,6 +1614,7 @@ def generate_test_plan(
     provider: str = "anthropic",
     model: str = "",
     project_context: str = "",
+    acceptance_criteria: str = "",
 ) -> str:
     """Test plan with a DETERMINISTIC skeleton.
 
@@ -1494,7 +1630,8 @@ def generate_test_plan(
         return err
     lang = _lang_instruction(language)
     prefix = _project_prefix(project_context)
-    ctx = _context_block(title, description, session_dir)
+    ctx = _context_block(title, description, session_dir,
+                         acceptance_criteria)
     vision = _model_has_vision(model or _DEFAULT_MODEL.get(provider, ""))
     max_img, max_w = _image_policy(provider)
     es = language == "es"
@@ -1551,6 +1688,7 @@ def generate_jira_ticket(
     provider: str = "anthropic",
     model: str = "",
     project_context: str = "",
+    acceptance_criteria: str = "",
 ) -> str:
     steps, err = _load_steps(session_dir)
     if err:
@@ -1562,6 +1700,7 @@ def generate_jira_ticket(
 
     title_line = f"**Title:** {title}" if title else "**Title:** (infer from session)"
     desc_line  = f"**Description:** {description}" if description else ""
+    ac_line    = _ac_block(acceptance_criteria)
     narration  = _load_transcript(session_dir)
     narr_line  = (
         f"Tester's spoken narration (transcribed):\n\"\"\"\n{narration}\n\"\"\"\n"
@@ -1569,12 +1708,20 @@ def generate_jira_ticket(
     )
 
     screenshot_instruction = "(refer to steps by number — do not embed images)"
+    # Only ask for an Acceptance Criteria field when there are criteria to
+    # restate; an empty heading on every ticket is noise.
+    ac_field = (
+        "**Acceptance Criteria**\n"
+        "(restate each criterion from the context above as a checklist item, "
+        "marking whether this session verified it)\n\n"
+    ) if ac_line else ""
     content = [{
         "type": "text",
         "text": (
             f"You are a senior QA engineer writing a Jira ticket. {lang}\n\n"
             f"{title_line}\n"
             f"{desc_line}\n"
+            f"{ac_line}"
             f"{narr_line}\n"
             "Below are the key steps of a recorded QA session.\n"
             "Steps may name the exact UI element and page — use those names "
@@ -1592,6 +1739,7 @@ def generate_jira_ticket(
             "| **Labels** | ... |\n\n"
             "**Description**\n"
             "(2-3 sentences summarising what was tested and what the outcome was)\n\n"
+            f"{ac_field}"
             "**Steps to Reproduce**\n"
             "1. ...\n\n"
             "**Expected Result**\n"
@@ -1631,42 +1779,69 @@ def generate_more_test_cases(
     provider: str = "anthropic",
     model: str = "",
     project_context: str = "",
+    acceptance_criteria: str = "",
 ) -> str:
     """Generate ``count`` NEW test cases that extend (not repeat) the report.
 
     Focus: edge cases, negative paths, boundary values and non-functional
-    checks the recorded happy path did not cover. Returns a Markdown section.
+    checks the recorded happy path did not cover. Same block shape as
+    ``generate_test_cases`` — these were never executed, so every row is
+    NOT RUN. Returns a Markdown section.
     """
     steps, err = _load_steps(session_dir)
     if err:
         return err
     lang = _lang_instruction(language)
     prefix = _project_prefix(project_context)
-    ctx = _context_block(title, description, session_dir)
+    ctx = _context_block(title, description, session_dir, acceptance_criteria)
     vision = _model_has_vision(model or _DEFAULT_MODEL.get(provider, ""))
     max_img, max_w = _image_policy(provider)
+    es = language == "es"
     # Existing cases as text only — images would blow up the prompt.
     prior = _strip_report_images(existing_report)
     if len(prior) > 12000:
         prior = prior[:12000] + " …"
-    heading = ("## Casos de prueba adicionales" if language == "es"
+    heading = ("## Casos de prueba adicionales" if es
                else "## Additional Test Cases")
+    cols = (("#", "Paso", "Resultado esperado", "Resultado obtenido", "Estado")
+            if es else
+            ("#", "Step", "Expected Result", "Actual Result", "Status"))
+    l_pre = "Precondiciones" if es else "Preconditions"
+    l_ac = "Criterios de aceptación" if es else "Acceptance criteria"
     content = [{
         "type": "text",
         "text": (
             f"You are a senior QA engineer expanding an existing test suite. {lang}\n"
             f"{ctx}\n"
             "Here is the CURRENT report generated for this session:\n"
-            f"\"\"\"\n{prior}\n\"\"\"\n\n"
-            f"Write exactly {count} NEW test cases that are NOT already covered above.\n"
-            "Prioritise: negative paths, edge cases, boundary values, input validation, "
-            "error handling, permissions, and usability/accessibility checks relevant "
-            "to the screens shown.\n"
-            f"Start your response with the heading line: {heading}\n"
-            "Then output ONLY a Markdown table — no other prose, no code blocks.\n"
-            "Columns: **#** | **Given** | **When** | **Then**\n"
-            "Number rows continuing after the existing cases. Never repeat or trivially "
-            "rephrase an existing case.\n\n"
+            f'"""\n{prior}\n"""\n\n'
+            f"Write exactly {count} NEW test cases that are NOT already covered "
+            "above.\n"
+            "Prioritise: negative paths, edge cases, boundary values, input "
+            "validation, error handling, permissions, and usability/accessibility "
+            "checks relevant to the screens shown. If acceptance criteria were "
+            "given above, prioritise any criterion the existing cases leave "
+            "untested.\n"
+            f"Start your response with the heading line: {heading} (write it "
+            "ONCE).\n"
+            "Then write ONE BLOCK PER TEST CASE, in exactly this shape and "
+            "nothing else:\n\n"
+            "### TC-XX — <objective of this case>\n"
+            f"**{l_pre}:** <state the system is in before step 1>\n"
+            f"**{l_ac}:** <what must hold for this case to pass>\n\n"
+            f"| {' | '.join(cols)} |\n"
+            "|---|---|---|---|---|\n"
+            "| 1 | <action to perform> | <expected observable result> | — | "
+            "NOT RUN |\n\n"
+            "Rules:\n"
+            "- A test case is a GROUP of steps (at least 2 step rows), never one "
+            "case per action.\n"
+            "- Continue the TC numbering after the highest TC-NN in the report "
+            "above; never repeat or trivially rephrase an existing case.\n"
+            f"- These cases were never executed: {cols[3]} is always '—' and "
+            f"{cols[4]} is always NOT RUN.\n"
+            "- Keep the field labels and column headers exactly as written "
+            "above. No prose outside the heading and the case blocks.\n\n"
             f"{_GROUNDING}"
         ),
     }]
@@ -1691,6 +1866,7 @@ def _generate_freeform(
     provider: str = "anthropic",
     model: str = "",
     project_context: str = "",
+    acceptance_criteria: str = "",
 ) -> str:
     """Shared scaffold for prose/list sections: standard QA context + steps +
     grounding, with a per-section heading and body instruction."""
@@ -1699,7 +1875,8 @@ def _generate_freeform(
         return err
     lang = _lang_instruction(language)
     prefix = _project_prefix(project_context)
-    ctx = _context_block(title, description, session_dir)
+    ctx = _context_block(title, description, session_dir,
+                         acceptance_criteria)
     vision = _model_has_vision(model or _DEFAULT_MODEL.get(provider, ""))
     max_img, max_w = _image_policy(provider)
     content = [{
@@ -1725,7 +1902,8 @@ def _generate_freeform(
 
 def generate_summary(session_dir: Path, language: str = "en", title: str = "",
                      description: str = "", provider: str = "anthropic",
-                     model: str = "", project_context: str = "") -> str:
+                     model: str = "", project_context: str = "",
+                     acceptance_criteria: str = "") -> str:
     """Short prose overview: what was tested, the flow, and the outcome."""
     es = language == "es"
     heading = "## Resumen" if es else "## Summary"
@@ -1735,13 +1913,15 @@ def generate_summary(session_dir: Path, language: str = "en", title: str = "",
         "If the outcome cannot be verified from the evidence, say so explicitly."
     )
     return _generate_freeform(session_dir, heading, instructions, language,
-                              title, description, provider, model, project_context)
+                              title, description, provider, model,
+                              project_context, acceptance_criteria)
 
 
 def generate_steps_to_reproduce(session_dir: Path, language: str = "en",
                                 title: str = "", description: str = "",
                                 provider: str = "anthropic", model: str = "",
-                                project_context: str = "") -> str:
+                                project_context: str = "",
+                                acceptance_criteria: str = "") -> str:
     """A clean numbered list of imperative reproduction steps."""
     es = language == "es"
     heading = "## Pasos para reproducir" if es else "## Steps to Reproduce"
@@ -1752,12 +1932,14 @@ def generate_steps_to_reproduce(session_dir: Path, language: str = "en",
         "No table, no headings other than the one above, no extra prose."
     )
     return _generate_freeform(session_dir, heading, instructions, language,
-                              title, description, provider, model, project_context)
+                              title, description, provider, model,
+                              project_context, acceptance_criteria)
 
 
 def generate_bug_report(session_dir: Path, language: str = "en", title: str = "",
                         description: str = "", provider: str = "anthropic",
-                        model: str = "", project_context: str = "") -> str:
+                        model: str = "", project_context: str = "",
+                        acceptance_criteria: str = "") -> str:
     """A concise bug report: summary, severity, repro steps, expected vs actual."""
     es = language == "es"
     heading = "## Reporte de bug" if es else "## Bug Report"
@@ -1784,12 +1966,14 @@ def generate_bug_report(session_dir: Path, language: str = "en", title: str = ""
             "No commentary outside those sections."
         )
     return _generate_freeform(session_dir, heading, instructions, language,
-                              title, description, provider, model, project_context)
+                              title, description, provider, model,
+                              project_context, acceptance_criteria)
 
 
 def generate_exploratory(session_dir: Path, language: str = "en", title: str = "",
                          description: str = "", provider: str = "anthropic",
-                         model: str = "", project_context: str = "") -> str:
+                         model: str = "", project_context: str = "",
+                         acceptance_criteria: str = "") -> str:
     """Exploratory-testing analysis of the session — written to double as
     reusable project knowledge (areas, behaviour, risks, coverage gaps)."""
     es = language == "es"
@@ -1827,7 +2011,8 @@ def generate_exploratory(session_dir: Path, language: str = "en", title: str = "
             "Be concrete and concise; never invent anything beyond the evidence."
         )
     return _generate_freeform(session_dir, heading, instructions, language,
-                              title, description, provider, model, project_context)
+                              title, description, provider, model,
+                              project_context, acceptance_criteria)
 
 
 # ------------------------------------------------------------------
@@ -1857,6 +2042,7 @@ def generate_qa_docs(
     provider: str = "anthropic",
     model: str = "",
     project_context: str = "",
+    acceptance_criteria: str = "",
 ) -> str:
     """
     Generate one or more report sections and concatenate them.
@@ -1872,7 +2058,8 @@ def generate_qa_docs(
     parts: list[str] = []
 
     # Metadata header (deterministic)
-    header = _report_header(session_dir, title, description, language)
+    header = _report_header(session_dir, title, description, language,
+                            acceptance_criteria)
     if header:
         parts.append(header)
 
@@ -1884,6 +2071,7 @@ def generate_qa_docs(
         provider=provider,
         model=model,
         project_context=project_context,   # optional; "" when the project has none
+        acceptance_criteria=acceptance_criteria,  # optional; per session
     )
 
     # Generate the requested sections in a stable, readable order. One flaky

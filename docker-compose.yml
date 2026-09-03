@@ -35,6 +35,8 @@ services:
       - MAX_IMAGES_LOCAL=${MAX_IMAGES_LOCAL:-5}
       # Max session steps sent to the model (raise for long sessions).
       - MAX_STEPS=${MAX_STEPS:-25}
+      # Max characters of the per-session acceptance criteria kept in prompts.
+      - MAX_AC_CHARS=${MAX_AC_CHARS:-4000}
       - LOG_LEVEL=warning
     extra_hosts:
       - "host.docker.internal:host-gateway"   # Linux fallback (no-op on Windows)

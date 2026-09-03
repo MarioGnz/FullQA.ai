@@ -25,11 +25,15 @@ from PyQt6.QtWidgets import (
     QAbstractItemView, QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox,
     QFileDialog, QFormLayout, QFrame, QGridLayout, QHBoxLayout, QInputDialog, QLabel,
     QLineEdit, QListView, QListWidget, QListWidgetItem, QMainWindow, QMessageBox, QPlainTextEdit,
-    QProgressBar, QPushButton, QScrollArea, QSizePolicy, QSplitter, QStackedWidget,
+    QProgressBar, QPushButton, QScrollArea, QSizePolicy, QSpinBox, QSplitter,
+    QStackedWidget,
     QTabWidget, QTextBrowser, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
 )
 
 API        = "http://localhost:8000"
+# Acceptance criteria longer than this are trimmed by the API before they
+# reach the model (claude_gen.MAX_AC_CHARS) - warn in the UI before that.
+AC_MAX_CHARS = 4000
 REFRESH_MS = 15_000
 HEALTH_MS  = 10_000
 
@@ -73,6 +77,28 @@ _TR: dict[str, dict[str, str]] = {
                           "en": "Testing title (e.g.: Login flow, Checkout)"},
     "ov_desc_ph":       {"es": "Descripcion breve (ej: Verificar que usuario puede iniciar sesion)",
                           "en": "Brief description (e.g.: Verify user can log in)"},
+    "ov_ac_lbl":        {"es": "Criterios de aceptación del ticket",
+                          "en": "Ticket acceptance criteria"},
+    "ov_ac_opt":        {"es": "opcional",                "en": "optional"},
+    "ov_ac_ph":         {"es": ("Pega aquí los criterios de aceptación del ticket, uno por línea:\n"
+                                "AC1 - El usuario puede iniciar sesión con credenciales válidas\n"
+                                "AC2 - Se muestra un error con credenciales inválidas"),
+                          "en": ("Paste the ticket acceptance criteria here, one per line:\n"
+                                 "AC1 - The user can log in with valid credentials\n"
+                                 "AC2 - An error is shown for invalid credentials")},
+    "ov_ac_hint":       {"es": ("Se guardan en esta sesión. La IA los trata como el requisito "
+                                "a verificar: cada caso de prueba indica qué criterio cubre y "
+                                "el reporte cierra con una tabla de cobertura."),
+                          "en": ("Saved with this session. The AI treats them as the requirement "
+                                 "under test: each test case names the criteria it covers and the "
+                                 "report closes with a coverage table.")},
+    "ov_ac_paste":      {"es": "Pegar",                   "en": "Paste"},
+    "ov_ac_paste_tip":  {"es": "Pegar los criterios desde el portapapeles",
+                          "en": "Paste the criteria from the clipboard"},
+    "ov_ac_clear":      {"es": "Limpiar",                 "en": "Clear"},
+    "ov_ac_chars":      {"es": "{n} caracteres",          "en": "{n} characters"},
+    "ov_ac_over":       {"es": "{n} caracteres · se recortará a {m}",
+                          "en": "{n} characters - will be trimmed to {m}"},
     "ov_sec_lbl":       {"es": "Secciones a generar:",  "en": "Sections to generate:"},
     "ov_lang_lbl":      {"es": "Idioma del reporte:",   "en": "Report language:"},
     "ov_generate":      {"es": "Generar Documentacion", "en": "Generate Documentation"},
@@ -140,12 +166,36 @@ _TR: dict[str, dict[str, str]] = {
     "rec_smart_model":  {"es": "Modelo IA:",             "en": "AI model:"},
     # Additional test cases
     "rp_more_cases":    {"es": "+ Test cases",           "en": "+ Test cases"},
-    "rp_more_tip":      {"es": ("Genera 5 casos de prueba nuevos (bordes, negativos, límites)\n"
-                                "que amplían el reporte sin duplicar los existentes."),
-                          "en": ("Generate 5 new test cases (edge, negative, boundary)\n"
-                                 "extending the report without duplicating existing ones.")},
-    "rp_more_generating": {"es": "Generando casos adicionales...",
-                           "en": "Generating additional cases..."},
+    "rp_more_tip":      {"es": ("Genera casos de prueba nuevos (bordes, negativos, límites)\n"
+                                "que amplían el reporte sin duplicar los existentes.\n"
+                                "Elige cuántos en la casilla de al lado."),
+                          "en": ("Generate new test cases (edge, negative, boundary)\n"
+                                 "extending the report without duplicating existing ones.\n"
+                                 "Choose how many in the box next to it.")},
+    "rp_more_count_tip":{"es": "Cuántos casos nuevos generar (1-20)",
+                          "en": "How many new cases to generate (1-20)"},
+    "rp_more_generating": {"es": "Generando {n} casos adicionales...",
+                           "en": "Generating {n} additional cases..."},
+    # Report editing
+    "rp_edit":          {"es": "Editar",                 "en": "Edit"},
+    "rp_edit_tip":      {"es": ("Edita el Markdown del reporte: corrige un estado, reescribe\n"
+                                "un caso o añade notas. Las capturas se muestran como\n"
+                                "marcadores [captura N] y se conservan al guardar."),
+                          "en": ("Edit the report Markdown: fix a status, reword a case or\n"
+                                 "add notes. Screenshots appear as [screenshot N] markers\n"
+                                 "and are preserved on save.")},
+    "rp_save":          {"es": "Guardar",                "en": "Save"},
+    "rp_save_tip":      {"es": "Guardar los cambios en el reporte",
+                          "en": "Save the changes to the report"},
+    "rp_saved":         {"es": "Reporte guardado",       "en": "Report saved"},
+    "rp_save_err":      {"es": "No se pudo guardar el reporte",
+                          "en": "Could not save the report"},
+    "rp_saving":        {"es": "Guardando...",           "en": "Saving..."},
+    "rp_unsaved_t":     {"es": "Cambios sin guardar",    "en": "Unsaved changes"},
+    "rp_unsaved_m":     {"es": "El reporte tiene cambios sin guardar. ¿Guardarlos?",
+                          "en": "The report has unsaved changes. Save them?"},
+    "rp_edit_none":     {"es": "Genera el reporte antes de editarlo.",
+                          "en": "Generate the report before editing it."},
     # Playwright codegen
     "pw_chk":           {"es": "Script Playwright",      "en": "Playwright script"},
     "pw_chk_tip":       {"es": ("Genera código Playwright (TypeScript) desde la sesión grabada.\n"
@@ -308,6 +358,7 @@ _PROVIDERS: dict[str, dict] = {
         "label": "Anthropic (Claude)",
         "models": [
             ("claude-sonnet-5",  "Claude Sonnet 5"),
+            ("claude-opus-5",    "Claude Opus 5  (máxima calidad)"),
             ("claude-haiku-4-5", "Claude Haiku 4.5  (rapido)"),
         ],
     },
@@ -315,7 +366,9 @@ _PROVIDERS: dict[str, dict] = {
         "label": "🖥  Local (Ollama)",
         # Fallback list — replaced live by /providers/ollama/models when reachable.
         "models": [
-            ("qwen2.5vl:7b",          "Qwen2.5-VL 7B  ★ recomendado"),
+            ("qwen2.5vl:7b",          "Qwen2.5-VL 7B  👁 visión  ★ recomendado"),
+            ("minicpm-v4.5:8b",       "MiniCPM-V 4.5 8B  👁 visión  (mejor OCR)"),
+            ("qwen3-vl:8b",           "Qwen3-VL 8B  👁 visión  (falla en tablas)"),
             ("llama3.2-vision:11b",   "Llama 3.2 Vision 11B"),
         ],
     },
@@ -379,7 +432,7 @@ _SECTION_META: dict[str, tuple[str, str, str]] = {
     "summary":            ("📝", "Qué se probó y el resultado",   "What was tested and the outcome"),
     "steps_to_reproduce": ("🧭", "Lista numerada de pasos",       "Numbered list of steps"),
     "exploratory":        ("🔎", "Charter, riesgos, cobertura",   "Charter, risks, coverage"),
-    "test_cases":         ("✅", "Gherkin Given/When/Then",        "Gherkin Given/When/Then"),
+    "test_cases":         ("✅", "Pasos, esperado y obtenido",     "Steps, expected and actual"),
     "test_plan":          ("📋", "Acción / esperado / estado",     "Action / expected / status"),
     "bug_report":         ("🐛", "Severidad, repro, esperado",     "Severity, repro, expected"),
     "jira":               ("🎫", "Ticket listo para Jira",         "Jira-ready ticket"),
@@ -628,12 +681,13 @@ QPushButton#RecordStop:hover {{ background: {p['danger_h']}; color: #ffffff; }}
 QPushButton#RecordStop:disabled {{ background: {p['border2']}; color: {p['surface']}; }}
 
 /* ── Inputs ─────────────────────────────────────────────────── */
-QLineEdit, QComboBox {{
+QLineEdit, QComboBox, QSpinBox {{
     background: {p['surface']}; border: 1px solid {p['border2']}; border-radius: 8px;
     padding: 6px 10px; selection-background-color: {p['sel_bg']}; selection-color: {p['sel_fg']};
 }}
-QLineEdit:hover, QComboBox:hover {{ border-color: {p['accent_h']}; }}
-QLineEdit:focus, QComboBox:focus {{ border: 1px solid {p['accent']}; }}
+QLineEdit:hover, QComboBox:hover, QSpinBox:hover {{ border-color: {p['accent_h']}; }}
+QLineEdit:focus, QComboBox:focus, QSpinBox:focus {{ border: 1px solid {p['accent']}; }}
+QSpinBox {{ padding: 2px 2px 2px 6px; }}
 QComboBox {{ combobox-popup: 0; }}
 QComboBox::drop-down {{ border: none; width: 24px; }}
 QComboBox QAbstractItemView {{
@@ -1176,11 +1230,25 @@ class ReportWorker(_W):
         except Exception as e:
             self.err.emit(str(e))
 
+class SaveReportWorker(_W):
+    """Write an edited report back to the API (PUT /sessions/{id}/report)."""
+    def __init__(self, sid: str, markdown: str, parent=None):
+        super().__init__(parent)
+        self.sid, self.markdown = sid, markdown
+    def run(self):
+        try:
+            # Reports carry base64 screenshots - allow for a slow write.
+            self.ok.emit(_put(f"/sessions/{self.sid}/report",
+                              {"report": self.markdown}, timeout=30))
+        except Exception as e:
+            self.err.emit(str(e))
+
 class GenerateWorker(_W):
     def __init__(self, sid: str, lang: str = "es",
                  title: str = "", description: str = "",
                  sections: list[str] | None = None,
                  provider: str = "anthropic", model: str = "",
+                 acceptance_criteria: str = "",
                  parent=None):
         super().__init__(parent)
         self.sid         = sid
@@ -1190,6 +1258,7 @@ class GenerateWorker(_W):
         self.sections    = sections or []
         self.provider    = provider
         self.model       = model
+        self.acceptance_criteria = acceptance_criteria
     def run(self):
         try:
             payload = {
@@ -1199,6 +1268,7 @@ class GenerateWorker(_W):
                 "sections":    self.sections,
                 "provider":    self.provider,
                 "model":       self.model,
+                "acceptance_criteria": self.acceptance_criteria,
             }
             self.ok.emit(_post(f"/sessions/{self.sid}/generate", payload))
         except Exception as e:
@@ -1208,12 +1278,14 @@ class MoreCasesWorker(_W):
     """Ask the backend to append N new test cases to an existing report."""
     def __init__(self, sid: str, lang: str = "es", count: int = 5,
                  title: str = "", description: str = "",
-                 provider: str = "anthropic", model: str = "", parent=None):
+                 provider: str = "anthropic", model: str = "",
+                 acceptance_criteria: str = "", parent=None):
         super().__init__(parent)
         self.sid = sid
         self.payload = {
             "language": lang, "count": count, "title": title,
             "description": description, "provider": provider, "model": model,
+            "acceptance_criteria": acceptance_criteria,
         }
     def run(self):
         try:
@@ -2136,6 +2208,7 @@ class RecorderPanel(QWidget):
         self._smart_model_cb = QComboBox()
         self._smart_model_cb.setEditable(True)
         self._smart_model_cb.addItem("qwen2.5vl:7b")
+        self._smart_model_cb.addItem("qwen3-vl:8b")
         self._smart_model_cb.addItem("llama3.2-vision:11b")
         row_sm.addWidget(self._smart_model_cb, 1)
         lay.addLayout(row_sm)
@@ -2527,8 +2600,9 @@ class SectionCard(QFrame):
 
 # ── Overview tab (card-based dashboard) ──────────────────────────────────────
 class OverviewTab(QWidget):
-    # (session_id, language, title, description, sections, provider, model)
-    generate_clicked = pyqtSignal(str, str, str, str, list, str, str)
+    # (session_id, language, title, description, sections, provider, model,
+    #  acceptance_criteria)
+    generate_clicked = pyqtSignal(str, str, str, str, list, str, str, str)
 
     def __init__(self, store: list | None = None, parent=None):
         super().__init__(parent)
@@ -2573,11 +2647,55 @@ class OverviewTab(QWidget):
         self._desc_edit = QLineEdit()
         self._desc_edit.setPlaceholderText(_tr("ov_desc_ph"))
         ctx_lay.addWidget(self._desc_edit)
-        # These two fields belong to the session, not to the widget. Persist on
+
+        # Acceptance criteria of the ticket under test. Optional and per
+        # session, so it stays collapsed until it is wanted (or until the
+        # session already has some) instead of eating the card every time.
+        ac_head = QHBoxLayout()
+        ac_head.setSpacing(6)
+        self._ac_toggle = QPushButton()
+        self._ac_toggle.setObjectName("Ghost")
+        self._ac_toggle.setCheckable(True)
+        self._ac_toggle.setFixedHeight(26)
+        self._ac_toggle.toggled.connect(self._on_ac_toggled)
+        ac_head.addWidget(self._ac_toggle)
+        ac_head.addStretch()
+        self._ac_paste = QPushButton(_tr("ov_ac_paste"))
+        self._ac_paste.setObjectName("Ghost")
+        self._ac_paste.setToolTip(_tr("ov_ac_paste_tip"))
+        self._ac_paste.setFixedHeight(26)
+        self._ac_paste.clicked.connect(self._paste_ac)
+        ac_head.addWidget(self._ac_paste)
+        self._ac_clear = QPushButton(_tr("ov_ac_clear"))
+        self._ac_clear.setObjectName("Ghost")
+        self._ac_clear.setFixedHeight(26)
+        self._ac_clear.clicked.connect(lambda: self._ac_edit.setPlainText(""))
+        ac_head.addWidget(self._ac_clear)
+        ctx_lay.addLayout(ac_head)
+
+        self._ac_edit = QPlainTextEdit()
+        self._ac_edit.setPlaceholderText(_tr("ov_ac_ph"))
+        self._ac_edit.setFixedHeight(104)
+        ctx_lay.addWidget(self._ac_edit)
+        ac_foot = QHBoxLayout()
+        self._ac_hint = QLabel(_tr("ov_ac_hint"))
+        self._ac_hint.setObjectName("Muted")
+        self._ac_hint.setWordWrap(True)
+        ac_foot.addWidget(self._ac_hint, 1)
+        self._ac_count = QLabel("")
+        self._ac_count.setObjectName("Muted")
+        ac_foot.addWidget(self._ac_count, 0, Qt.AlignmentFlag.AlignTop)
+        ctx_lay.addLayout(ac_foot)
+        self._ac_widgets = (self._ac_edit, self._ac_hint, self._ac_count)
+        self._on_ac_toggled(False)      # collapsed until asked for
+
+        # These fields belong to the session, not to the widget. Persist on
         # every keystroke so switching sessions (or restarting) never loses what
         # was typed.
         self._title_edit.textChanged.connect(self._save_ctx)
         self._desc_edit.textChanged.connect(self._save_ctx)
+        self._ac_edit.textChanged.connect(self._save_ctx)
+        self._ac_edit.textChanged.connect(self._update_ac_count)
         lay.addWidget(ctx_card)
 
         # ── Card 2: what to generate (section cards) ──────────
@@ -2672,6 +2790,50 @@ class OverviewTab(QWidget):
         lay.addWidget(self._lbl)
 
         lay.addStretch()
+
+    # -- acceptance criteria box ----------------------------------------
+    def acceptance_criteria(self) -> str:
+        return self._ac_edit.toPlainText().strip()
+
+    def _on_ac_toggled(self, shown: bool) -> None:
+        for w in self._ac_widgets:
+            w.setVisible(shown)
+        self._ac_paste.setVisible(shown)
+        self._ac_clear.setVisible(shown)
+        self._sync_ac_toggle()
+
+    def _sync_ac_toggle(self) -> None:
+        """Label the toggle, marking (with a dot) criteria kept collapsed."""
+        shown = self._ac_toggle.isChecked()
+        filled = bool(self._ac_edit.toPlainText().strip())
+        arrow = "▾" if shown else "▸"
+        mark = "  ●" if (filled and not shown) else ""
+        self._ac_toggle.setText(
+            f'{arrow}  {_tr("ov_ac_lbl")}  ({_tr("ov_ac_opt")}){mark}')
+
+    def _paste_ac(self) -> None:
+        """Append the clipboard to the box - the criteria usually arrive as
+        one paste from the ticket, and appending never destroys what is
+        already there."""
+        text = (QApplication.clipboard().text() or "").strip()
+        if not text:
+            return
+        current = self._ac_edit.toPlainText().rstrip()
+        self._ac_edit.setPlainText(f"{current}\n{text}" if current else text)
+
+    def _update_ac_count(self) -> None:
+        n = len(self._ac_edit.toPlainText().strip())
+        if not n:
+            self._ac_count.setText("")
+        elif n > AC_MAX_CHARS:
+            self._ac_count.setText(
+                _tr("ov_ac_over").format(n=n, m=AC_MAX_CHARS))
+        else:
+            self._ac_count.setText(_tr("ov_ac_chars").format(n=n))
+        self._ac_count.setProperty("tone", "bad" if n > AC_MAX_CHARS else "")
+        self._ac_count.style().unpolish(self._ac_count)
+        self._ac_count.style().polish(self._ac_count)
+        self._sync_ac_toggle()
 
     def _update_loc_badge(self, pid: str) -> None:
         """Colour the Local/Cloud badge for the selected provider."""
@@ -2769,6 +2931,7 @@ class OverviewTab(QWidget):
             sections,
             self._prov_cb.currentData() or "anthropic",
             self._mdl_cb.currentData() or "",
+            self.acceptance_criteria(),
         )
 
     def current_settings(self) -> dict:
@@ -2780,6 +2943,7 @@ class OverviewTab(QWidget):
             "description": self._desc_edit.text().strip(),
             "provider":    self._prov_cb.currentData() or "anthropic",
             "model":       self._mdl_cb.currentData() or "",
+            "acceptance_criteria": self.acceptance_criteria(),
         }
 
     # ── per-session report context (title / description) ────────────────
@@ -2790,19 +2954,26 @@ class OverviewTab(QWidget):
         st = _settings()
         st.setValue(f"session_ctx/{self._sid}/title", self._title_edit.text())
         st.setValue(f"session_ctx/{self._sid}/description", self._desc_edit.text())
+        st.setValue(f"session_ctx/{self._sid}/acceptance_criteria",
+                    self._ac_edit.toPlainText())
 
     def _restore_ctx(self, sid: str):
         st = _settings()
         title = st.value(f"session_ctx/{sid}/title", "") or ""
         desc  = st.value(f"session_ctx/{sid}/description", "") or ""
+        ac    = st.value(f"session_ctx/{sid}/acceptance_criteria", "") or ""
         # Guard the setText calls: textChanged would otherwise fire _save_ctx
         # and write the outgoing session's text under the incoming session's id.
         self._restoring_ctx = True
         try:
             self._title_edit.setText(str(title))
             self._desc_edit.setText(str(desc))
+            self._ac_edit.setPlainText(str(ac))
         finally:
             self._restoring_ctx = False
+        # A session that already carries criteria opens with them in view.
+        self._ac_toggle.setChecked(bool(str(ac).strip()))
+        self._update_ac_count()
 
     @staticmethod
     def _duration(s: dict) -> str:
@@ -2854,6 +3025,9 @@ class OverviewTab(QWidget):
             card.setEnabled(not v)
         self._title_edit.setEnabled(not v)
         self._desc_edit.setEnabled(not v)
+        self._ac_edit.setEnabled(not v)
+        self._ac_paste.setEnabled(not v)
+        self._ac_clear.setEnabled(not v)
         self._prov_cb.setEnabled(not v)
         self._mdl_cb.setEnabled(not v)
         self._btn_test.setEnabled(not v)
@@ -2875,6 +3049,12 @@ class OverviewTab(QWidget):
         self._ctx_lbl.setText(_tr("ov_ctx_lbl"))
         self._title_edit.setPlaceholderText(_tr("ov_title_ph"))
         self._desc_edit.setPlaceholderText(_tr("ov_desc_ph"))
+        self._ac_edit.setPlaceholderText(_tr("ov_ac_ph"))
+        self._ac_hint.setText(_tr("ov_ac_hint"))
+        self._ac_paste.setText(_tr("ov_ac_paste"))
+        self._ac_paste.setToolTip(_tr("ov_ac_paste_tip"))
+        self._ac_clear.setText(_tr("ov_ac_clear"))
+        self._update_ac_count()
         self._sec_lbl.setText(_tr("ov_sec_lbl"))
         for card in self._sec_cards.values():
             card.retranslate()
@@ -3039,35 +3219,68 @@ class EventsTab(QWidget):
 
 # ── Report tab ───────────────────────────────────────────────────────────────
 class ReportTab(QWidget):
-    more_cases_clicked    = pyqtSignal()
+    more_cases_clicked     = pyqtSignal(int)   # how many new cases to generate
     add_to_context_clicked = pyqtSignal()
+    save_requested         = pyqtSignal(str)   # edited Markdown, images restored
+
+    # View modes for the report pane.
+    RENDERED, MARKDOWN, EDIT = "rendered", "markdown", "edit"
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self._raw      = ""
-        self._rendered = True
+        self._raw    = ""      # last SAVED Markdown (images embedded)
+        self._mode   = self.RENDERED
+        self._images: list[str] = []   # data-URIs pulled out of the editor text
+        self._dirty  = False
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 4, 0, 0)
         lay.setSpacing(4)
         toolbar = QHBoxLayout()
         self._btn_r = QPushButton(_tr("rp_rendered"))
         self._btn_m = QPushButton("Markdown")
+        self._btn_e = QPushButton("✎ " + _tr("rp_edit"))
+        self._btn_e.setToolTip(_tr("rp_edit_tip"))
+        self._btn_e.setEnabled(False)
+        self._btn_s = QPushButton(_tr("rp_save"))
+        self._btn_s.setToolTip(_tr("rp_save_tip"))
+        self._btn_s.setEnabled(False)
+        self._btn_s.setVisible(False)
+        self._btn_s.clicked.connect(self._on_save)
         self._btn_c = QPushButton(_tr("rp_copy"))
         self._btn_more = QPushButton(_tr("rp_more_cases"))
         self._btn_more.setToolTip(_tr("rp_more_tip"))
         self._btn_more.setEnabled(False)
-        self._btn_more.clicked.connect(self.more_cases_clicked.emit)
+        self._btn_more.clicked.connect(
+            lambda: self.more_cases_clicked.emit(self.more_count()))
+        # How many extra cases to ask for. Remembered globally: it is a working
+        # habit ("give me three at a time"), not a property of one session.
+        self._more_n = QSpinBox()
+        self._more_n.setRange(1, 20)
+        self._more_n.setToolTip(_tr("rp_more_count_tip"))
+        self._more_n.setFixedHeight(28)
+        self._more_n.setFixedWidth(52)
+        try:
+            saved_n = int(_settings().value("report/more_cases_count", 5))
+        except (TypeError, ValueError):
+            saved_n = 5
+        self._more_n.setValue(max(1, min(20, saved_n)))
+        self._more_n.valueChanged.connect(
+            lambda v: _settings().setValue("report/more_cases_count", v))
         self._btn_ctx = QPushButton(_tr("ctx_add_report"))
         self._btn_ctx.setToolTip(_tr("ctx_add_tip"))
         self._btn_ctx.setEnabled(False)
         self._btn_ctx.clicked.connect(self.add_to_context_clicked.emit)
         self._btn_pdf = QPushButton("⤓ " + _tr("rp_export_pdf"))
         self._btn_pdf.setObjectName("Accent")
-        for b in (self._btn_r, self._btn_m, self._btn_c, self._btn_more,
-                  self._btn_ctx):
+        for b in (self._btn_r, self._btn_m, self._btn_e, self._btn_s,
+                  self._btn_c, self._btn_more, self._btn_ctx):
             b.setObjectName("Ghost")
-        for b in (self._btn_r, self._btn_m, self._btn_c, self._btn_more,
-                  self._btn_ctx, self._btn_pdf):
+        for b in (self._btn_r, self._btn_m, self._btn_e, self._btn_s,
+                  self._btn_c, self._btn_more):
+            b.setFixedHeight(28)
+            toolbar.addWidget(b)
+        toolbar.addWidget(self._more_n)
+        for b in (self._btn_ctx, self._btn_pdf):
             b.setFixedHeight(28)
             toolbar.addWidget(b)
         toolbar.addStretch()
@@ -3077,24 +3290,132 @@ class ReportTab(QWidget):
         self._hint_lbl.setVisible(False)
         toolbar.addWidget(self._hint_lbl)
         lay.addLayout(toolbar)
+
+        # Rendered/Markdown share the browser; editing gets its own plain text
+        # widget so the browser never has to be made writable.
+        self._stack = QStackedWidget()
         self._view = _ReportBrowser()
         self._view.setObjectName("ReportView")
         self._view.image_clicked.connect(self._on_image_click)
-        lay.addWidget(self._view)
-        self._btn_r.clicked.connect(lambda: self._show(True))
-        self._btn_m.clicked.connect(lambda: self._show(False))
-        self._btn_c.clicked.connect(lambda: QApplication.clipboard().setText(self._raw))
+        self._stack.addWidget(self._view)
+        self._editor = QPlainTextEdit()
+        self._editor.setObjectName("ReportEditor")
+        self._editor.setFont(QFont("Consolas", 10))
+        self._editor.setLineWrapMode(QPlainTextEdit.LineWrapMode.WidgetWidth)
+        self._editor.textChanged.connect(self._on_edited)
+        self._stack.addWidget(self._editor)
+        lay.addWidget(self._stack)
+
+        self._btn_r.clicked.connect(lambda: self._show(self.RENDERED))
+        self._btn_m.clicked.connect(lambda: self._show(self.MARKDOWN))
+        self._btn_e.clicked.connect(lambda: self._show(self.EDIT))
+        self._btn_c.clicked.connect(
+            lambda: QApplication.clipboard().setText(self.current_markdown()))
         self._btn_pdf.clicked.connect(self._export_pdf)
 
-    def load(self, text: str):
-        self._raw = text
-        self._btn_more.setEnabled(bool(text.strip()))
-        self._btn_ctx.setEnabled(bool(text.strip()))
-        self._show(self._rendered)
+    # ── screenshot placeholders ─────────────────────────────────────────────
+    # A generated report embeds every screenshot as a base64 data-URI, which
+    # would drown the editor in thousands of unreadable characters. Editing
+    # swaps each one for a short marker and puts it back on the way out.
+    _IMG_RE = re.compile(r'!\[([^\]]*)\]\((data:image/[^)]*)\)')
 
-    def _show(self, rendered: bool):
-        self._rendered = rendered
-        if rendered:
+    def _collapse_images(self, md: str) -> str:
+        self._images = []
+
+        def _sub(m: re.Match) -> str:
+            self._images.append(m.group(2))
+            n = len(self._images)
+            label = m.group(1) or (f"captura {n}" if _ui_lang == "es"
+                                   else f"screenshot {n}")
+            return f"![{label}](img://{n})"
+
+        return self._IMG_RE.sub(_sub, md)
+
+    def _expand_images(self, md: str) -> str:
+        """Restore the data-URIs. A marker the tester deleted stays deleted;
+        one that points nowhere is left untouched rather than guessed at."""
+        def _sub(m: re.Match) -> str:
+            idx = int(m.group(2))
+            if 1 <= idx <= len(self._images):
+                return f"![{m.group(1)}]({self._images[idx - 1]})"
+            return m.group(0)
+
+        return re.sub(r'!\[([^\]]*)\]\(img://(\d+)\)', _sub, md)
+
+    # ── state ───────────────────────────────────────────────────────────────
+    def current_markdown(self) -> str:
+        """The report as it stands, including edits not yet saved."""
+        if self._mode == self.EDIT:
+            return self._expand_images(self._editor.toPlainText())
+        return self._raw
+
+    def is_dirty(self) -> bool:
+        return self._dirty
+
+    def more_count(self) -> int:
+        return self._more_n.value()
+
+    def _on_edited(self):
+        if self._mode != self.EDIT:
+            return          # programmatic fill, not a keystroke
+        self._dirty = True
+        self._btn_s.setVisible(True)
+        self._btn_s.setEnabled(True)
+        self._btn_s.setText(_tr("rp_save") + " ●")
+
+    def _on_save(self):
+        self._btn_s.setEnabled(False)
+        self._btn_s.setText(_tr("rp_saving"))
+        self.save_requested.emit(self.current_markdown())
+
+    def save_finished(self, ok: bool):
+        """Called back by the panel that owns the network worker."""
+        if ok:
+            self._raw = self.current_markdown()
+            self._dirty = False
+            self._btn_s.setText(_tr("rp_save"))
+            self._btn_s.setEnabled(False)
+            self._btn_s.setVisible(self._mode == self.EDIT)
+        else:
+            self._btn_s.setText(_tr("rp_save") + " ●")
+            self._btn_s.setEnabled(True)
+
+    def clear_dirty(self):
+        self._dirty = False
+        self._btn_s.setEnabled(False)
+        self._btn_s.setText(_tr("rp_save"))
+        self._btn_s.setVisible(self._mode == self.EDIT)
+
+    def load(self, text: str):
+        if self._dirty:
+            return          # never clobber unsaved edits with a refetch
+        self._raw = text
+        has = bool(text.strip())
+        for b in (self._btn_more, self._btn_ctx, self._btn_e):
+            b.setEnabled(has)
+        self._show(self._mode if has else self.RENDERED)
+
+    def _show(self, mode: str):
+        if mode == self.EDIT and not self._raw.strip():
+            QMessageBox.information(self, _tr("rp_edit"), _tr("rp_edit_none"))
+            return
+        # Leaving the editor keeps whatever was typed: the text stays in the
+        # widget and current_markdown() still returns it, so switching to the
+        # rendered view to check the result never costs the edits.
+        if self._mode == self.EDIT and mode != self.EDIT:
+            self._raw = self.current_markdown()
+        self._mode = mode
+        self._btn_s.setVisible(mode == self.EDIT or self._dirty)
+        if mode == self.EDIT:
+            self._stack.setCurrentWidget(self._editor)
+            was_dirty = self._dirty
+            self._editor.setPlainText(self._collapse_images(self._raw))
+            self._dirty = was_dirty      # setPlainText is not a user edit
+            self._hint_lbl.setVisible(False)
+            self._editor.setFocus()
+            return
+        self._stack.setCurrentWidget(self._view)
+        if mode == self.RENDERED:
             self._view.set_html_with_images(_to_html(self._raw))
             # Show hint only when there are embedded images
             self._hint_lbl.setVisible(bool(self._view._images))
@@ -3109,14 +3430,20 @@ class ReportTab(QWidget):
             ImageDialog(pix, name, self).exec()
 
     def placeholder(self, msg: str):
+        if self._dirty:
+            return          # a poll must not wipe an edit in progress
         self._raw = ""
+        self._mode = self.RENDERED
         self._btn_more.setEnabled(False)
         self._btn_ctx.setEnabled(False)
+        self._btn_e.setEnabled(False)
+        self._btn_s.setVisible(False)
+        self._stack.setCurrentWidget(self._view)
         self._view.setPlainText(msg)
 
     # ── PDF export (images embedded per step) ────────────────────────────────
     def _export_pdf(self):
-        if not self._raw.strip():
+        if not self.current_markdown().strip():
             QMessageBox.information(self, _tr("rp_export_pdf"), _tr("rp_pdf_none"))
             return
         default_name = "qa-report.pdf"
@@ -3132,7 +3459,7 @@ class ReportTab(QWidget):
         # data-URI image as a QTextDocument resource so it renders in the PDF.
         doc = QTextDocument()
         doc.setDefaultStyleSheet(_PDF_CSS)
-        html_src = _to_html(self._raw)
+        html_src = _to_html(self.current_markdown())
         idx = [0]
 
         def _register(m: re.Match) -> str:
@@ -3172,8 +3499,13 @@ class ReportTab(QWidget):
     def retranslate(self):
         self._btn_r.setText(_tr("rp_rendered"))
         self._btn_c.setText(_tr("rp_copy"))
+        self._btn_e.setText("✎ " + _tr("rp_edit"))
+        self._btn_e.setToolTip(_tr("rp_edit_tip"))
+        self._btn_s.setText(_tr("rp_save") + (" ●" if self._dirty else ""))
+        self._btn_s.setToolTip(_tr("rp_save_tip"))
         self._btn_more.setText(_tr("rp_more_cases"))
         self._btn_more.setToolTip(_tr("rp_more_tip"))
+        self._more_n.setToolTip(_tr("rp_more_count_tip"))
         self._btn_ctx.setText(_tr("ctx_add_report"))
         self._btn_ctx.setToolTip(_tr("ctx_add_tip"))
         self._btn_pdf.setText("⤓ " + _tr("rp_export_pdf"))
@@ -3218,10 +3550,19 @@ class DetailPanel(QWidget):
         self._ov.generate_clicked.connect(self._do_generate)
         self._rp.more_cases_clicked.connect(self._do_more_cases)
         self._rp.add_to_context_clicked.connect(self._append_to_context)
+        self._rp.save_requested.connect(self._do_save_report)
         self._tabs.currentChanged.connect(self._tab_changed)
 
     def load(self, session: dict):
         same = bool(self._sid) and session.get("session_id", "") == self._sid
+        if not same and self._sid and self._rp.is_dirty():
+            # Leaving a session with unsaved report edits: offer to keep them
+            # (the worker carries the OLD id, so the write still lands right).
+            if QMessageBox.question(
+                    self, _tr("rp_unsaved_t"), _tr("rp_unsaved_m")
+            ) == QMessageBox.StandardButton.Yes:
+                self._save_report(self._sid, self._rp.current_markdown())
+            self._rp.clear_dirty()
         self._sid = session.get("session_id", "")
         self._session = session
         ts        = _fmt(session.get("started_at"))
@@ -3290,8 +3631,8 @@ class DetailPanel(QWidget):
         w.start_tracked(self._store)
 
     def _load_report(self):
-        if not self._sid:
-            return
+        if not self._sid or self._rp.is_dirty():
+            return          # unsaved edits outrank a refresh
         self._rp.placeholder(_tr("dp_rp_loading"))
         w = ReportWorker(self._sid)
         w.ok.connect(self._rp.load)
@@ -3301,7 +3642,8 @@ class DetailPanel(QWidget):
     def _do_generate(self, sid: str, lang: str = "es",
                       title: str = "", description: str = "",
                       sections: list | None = None,
-                      provider: str = "anthropic", model: str = ""):
+                      provider: str = "anthropic", model: str = "",
+                      acceptance_criteria: str = ""):
         if not sid:
             return
         sections = list(sections or [])
@@ -3315,7 +3657,7 @@ class DetailPanel(QWidget):
             return          # Playwright-only run: no AI generation needed
         self._ov.set_generating(True)
         w = GenerateWorker(sid, lang, title, description, sections,
-                           provider, model)
+                           provider, model, acceptance_criteria)
         w.ok.connect(self._gen_ok)
         w.err.connect(self._gen_err)
         w.start_tracked(self._store)
@@ -3348,18 +3690,49 @@ class DetailPanel(QWidget):
         self._ov.set_generating(False)
         QMessageBox.critical(self, _tr("gen_err_title"), error)
 
-    def _do_more_cases(self):
-        """'+ Test cases': append new, non-duplicate cases to the report using
-        the provider/model/language currently selected in the Overview tab."""
+    def _do_save_report(self, markdown: str):
+        self._save_report(self._sid, markdown)
+
+    def _save_report(self, sid: str, markdown: str):
+        """PUT an edited report. The id is passed in rather than read from
+        self, so a save fired while leaving a session still writes to it."""
+        if not sid:
+            return
+        w = SaveReportWorker(sid, markdown)
+        w.ok.connect(lambda _r, s=sid: self._save_report_ok(s))
+        w.err.connect(self._save_report_err)
+        w.start_tracked(self._store)
+
+    def _save_report_ok(self, sid: str):
+        if sid == self._sid:
+            self._rp.save_finished(True)
+        self.statusBar_message(_tr("rp_saved"))
+
+    def _save_report_err(self, error: str):
+        self._rp.save_finished(False)
+        QMessageBox.critical(self, _tr("rp_save_err"), error)
+
+    def _do_more_cases(self, count: int = 5):
+        """'+ Test cases': append `count` new, non-duplicate cases to the
+        report using the provider/model/language selected in Overview."""
         if not self._sid:
             return
+        if self._rp.is_dirty():
+            # The backend appends to ITS copy of the report; unsaved edits
+            # would be overwritten by the result.
+            if QMessageBox.question(
+                    self, _tr("rp_unsaved_t"), _tr("rp_unsaved_m")
+            ) == QMessageBox.StandardButton.Yes:
+                self._save_report(self._sid, self._rp.current_markdown())
+            self._rp.clear_dirty()
         cfg = self._ov.current_settings()
         self._rp._btn_more.setEnabled(False)
-        self._rp.placeholder(_tr("rp_more_generating"))
+        self._rp.placeholder(_tr("rp_more_generating").format(n=count))
         w = MoreCasesWorker(
-            self._sid, lang=cfg["lang"], count=5,
+            self._sid, lang=cfg["lang"], count=count,
             title=cfg["title"], description=cfg["description"],
             provider=cfg["provider"], model=cfg["model"],
+            acceptance_criteria=cfg["acceptance_criteria"],
         )
         w.ok.connect(lambda _r: self._start_poll())
         w.err.connect(self._more_cases_err)

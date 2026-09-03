@@ -281,12 +281,17 @@ Elige cualquier combinación en la pestaña **Resumen**. Las secciones siempre s
 | **Resumen / Explicación** | 2–4 frases: qué se probó, el flujo y el resultado |
 | **Pasos para reproducir** | Lista numerada y limpia de pasos en imperativo |
 | **Testing exploratorio** | Charter, áreas, observaciones, riesgos, cobertura (ver arriba) |
-| **Casos de prueba** | Tabla estilo Gherkin Dado / Cuando / Entonces |
+| **Casos de prueba** | Un bloque por caso: objetivo, precondiciones, los criterios de aceptación que verifica y una tabla Paso / Resultado esperado / Resultado obtenido / Estado. Un caso de prueba agrupa varios pasos — no es un caso por acción. Con los criterios del ticket pegados, cierra con una tabla de cobertura |
 | **Plan de pruebas** | Tabla Paso / Acción / Esperado / Estado (las acciones se construyen de forma determinista a partir de eventos reales) |
 | **Reporte de bug** | Resumen, severidad, pasos de reproducción, esperado vs. real |
 | **Ticket Jira** | Ticket listo para Jira (título, tipo, prioridad, etiquetas, descripción, reproducción, esperado/real) |
 
-Todos los reportes terminan además con un **recorrido visual**: una captura por paso. El botón **+ Test cases** añade casos nuevos y sin duplicados a un reporte existente.
+Todos los reportes terminan además con un **recorrido visual**: una captura por paso.
+
+El reporte lo terminas tú:
+
+- **Editar** abre el Markdown del reporte para modificarlo — corregir un estado, reescribir un caso, añadir una nota — y **Guardar** lo escribe de vuelta. Mientras editas, las capturas se reducen a marcadores cortos `![alt](img://N)` (un reporte es casi todo base64) y se restauran al guardar; borra un marcador para quitar esa captura.
+- **+ Test cases** añade casos nuevos y sin duplicados a un reporte existente. La casilla de al lado elige cuántos (1–20), y la elección se recuerda.
 
 ---
 
@@ -482,6 +487,7 @@ Cuanto más ricos sean los campos capturados (`selector`, `control`, `element`),
 | `POST` | `/sessions/{id}/generate` | Lanza la generación asíncrona del reporte (secciones, proveedor, modelo) |
 | `POST` | `/sessions/{id}/report/more-cases` | Añade N casos de prueba nuevos |
 | `GET`  | `/sessions/{id}/report` | Obtiene el reporte Markdown generado |
+| `PUT`  | `/sessions/{id}/report` | Sobrescribe el reporte con Markdown editado |
 | `GET`  | `/sessions/{id}/events` | Eventos parseados |
 | `GET`  | `/sessions/{id}/screenshots/{file}` | Sirve un PNG de captura |
 | `GET`  | `/sessions/{id}/playwright` | Genera un spec de Playwright profesional |
