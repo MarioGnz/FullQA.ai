@@ -78,14 +78,23 @@ def _field_hint(step: dict) -> str:
     return hint
 
 
-def _esc(text: str) -> str:
+def _esc(text: str, max_len: int | None = 120) -> str:
     """Escape a string for a single-quoted TS literal (bounded length).
 
     Newlines are collapsed to spaces — a session name with a line break was
     emitted verbatim into test('…') and broke the whole spec at parse time.
+
+    ``max_len=None`` disables the length cap. Required for URLs: a query string
+    cut mid-parameter is a different URL, so goto() would land somewhere else.
     """
     flat = re.sub(r"\s+", " ", text or "").strip()
-    return flat.replace("\\", "\\\\").replace("'", "\\'")[:120]
+    out = flat.replace("\\", "\\\\").replace("'", "\\'")
+    return out[:max_len] if max_len else out
+
+
+def _esc_url(url: str) -> str:
+    """Escape a URL for a TS literal — never truncated (see _esc/_nav_url)."""
+    return _esc(url, max_len=None)
 
 
 def _esc_re(text: str) -> str:
@@ -110,8 +119,14 @@ _FILLABLE_ROLES = {"textbox", "searchbox", "spinbutton", "combobox"}
 
 
 # Browser-chrome UI (address bar etc.) in common locales.
+# Newer Chrome exposes the omnibox as a ComboBox whose accessible name is the
+# search placeholder ("Pregúntale a Google" / "Search Google or type a URL"),
+# not the classic "address bar" string — so those names must be listed too or
+# typing a search term becomes a page fill on a locator that cannot exist.
 _ADDRESS_BAR_RE = re.compile(
-    r"barra de direcciones|address and search|address bar|omnibox", re.I)
+    r"barra de direcciones|address and search|address bar|omnibox|"
+    r"preg[uú]ntale a google|ask google|"
+    r"search google or type|buscar con google o escribir", re.I)
 _URLISH_RE = re.compile(r"^(https?://)?[\w.-]+\.[a-z]{2,}(/\S*)?$", re.I)
 
 
@@ -127,7 +142,7 @@ def _is_browser_chrome(ev: dict) -> bool:
     if _ADDRESS_BAR_RE.search(ev.get("element") or ""):
         return True
     # Typing whose content is a URL/domain into a bare browser Edit control.
-    if ev.get("type") == "key" and (ev.get("control") or "") == "Edit":
+    if ev.get("type") == "key" and (ev.get("control") or "") in ("Edit", "ComboBox"):
         val = (ev.get("value") or ev.get("text") or "").strip()
         if val and _URLISH_RE.match(val):
             return True
@@ -250,6 +265,18 @@ def _human_target(step: dict) -> str:
     return f"`{sel[:40]}`" if sel else "the element"
 
 
+def _nav_url(url: str) -> str:
+    """URL for *navigation* — keeps the query string and the full length.
+
+    ``_clean_url`` is a display helper: it drops the query string and truncates
+    to 90 chars. Feeding that to ``page.goto()`` produces a URL that no longer
+    means the same thing — ``google.com/search?q=x`` becomes ``google.com/search``,
+    which Google redirects to ``/webhp``, so the step's own URL assertion then
+    fails. Use this for goto()/waitForURL() and _clean_url() only for labels.
+    """
+    return (url or "").strip()
+
+
 def _url_assertion(url: str) -> str | None:
     """A resilient URL assertion keyed on host + first path segment.
 
@@ -337,9 +364,10 @@ def generate_playwright(
     for ev in events:
         u = _clean_url(ev.get("url") or "")
         if u and not _NOISE_URL_RE.search(u):
+            nav = _nav_url(ev.get("url") or "")
             first_url = u
-            body = [f"await page.goto('{_esc(u)}');"]
-            a = _url_assertion(u)
+            body = [f"await page.goto('{_esc_url(nav)}');"]
+            a = _url_assertion(nav)
             if a:
                 body.append(a)
             step(f"Open {u}", body, is_nav=True)
@@ -381,7 +409,8 @@ def generate_playwright(
 
     for i, ev in enumerate(events):
         etype = ev.get("type", "")
-        url = _clean_url(ev.get("url") or "")
+        url = _clean_url(ev.get("url") or "")       # labels only
+        nav_url = _nav_url(ev.get("url") or "")     # goto()/waitForURL()
         ets = _ts_or_none(ev)
 
         # Address bar & co.: browser UI, not the page — never a page action.
@@ -395,13 +424,13 @@ def generate_playwright(
                 continue
             if first_url is None and url:
                 first_url = url
-                body = [f"await page.goto('{_esc(url)}');"]
-                assertion = _url_assertion(url)
+                body = [f"await page.goto('{_esc_url(nav_url)}');"]
+                assertion = _url_assertion(nav_url)
                 if assertion:
                     body.append(assertion)
                 step(f"Open {url}", body, is_nav=True)
             elif url:
-                assertion = _url_assertion(url)
+                assertion = _url_assertion(nav_url)
                 caused_by_action = (
                     ets is not None and last_action_ts is not None
                     and 0 <= ets - last_action_ts <= ACTION_NAV_WINDOW)
@@ -410,7 +439,7 @@ def generate_playwright(
                     and 0 <= ets - last_nav_ts <= REDIRECT_WINDOW)
                 if caused_by_action:
                     body = [assertion] if assertion else [
-                        f"await page.waitForURL('{_esc(url)}**');"]
+                        f"await page.waitForURL('{_esc_url(nav_url)}**');"]
                     # The URL matching is not enough: the new document may
                     # still be parsing — wait for the DOM before acting on it.
                     body.append("await page.waitForLoadState('domcontentloaded')"
@@ -422,7 +451,7 @@ def generate_playwright(
                     pass          # duplicate of the opening goto — skip
                 else:
                     # User navigated by hand — replay it explicitly.
-                    body = [f"await page.goto('{_esc(url)}');"]
+                    body = [f"await page.goto('{_esc_url(nav_url)}');"]
                     if assertion:
                         body.append(assertion)
                     step(f"Go to {url}", body, is_nav=True)
@@ -632,10 +661,11 @@ def generate_playwright(
         for ev in events:
             u = _clean_url(ev.get("url") or "")
             if u:
+                nav = _nav_url(ev.get("url") or "")
                 first_url = u
                 seed = [f"    await test.step('Open {_esc(u)}', async () => {{",
-                        f"      await page.goto('{_esc(u)}');"]
-                a = _url_assertion(u)
+                        f"      await page.goto('{_esc_url(nav)}');"]
+                a = _url_assertion(nav)
                 if a:
                     seed.append(f"      {a}")
                 seed.append("    });")
